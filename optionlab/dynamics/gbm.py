@@ -22,7 +22,7 @@ class GBM(Dynamics):
         Constant volatility.
     """
 
-    def __init__(self, r: float = 0.05, q: float = 0.0, sigma: float = 0.20):
+    def __init__(self, r: float = 0.05, q: float = 0.0, sigma: float = 0.20) -> None:
         self.r = r
         self.q = q
         self.sigma = sigma
@@ -57,14 +57,14 @@ class GBM(Dynamics):
         n_steps = len(t_grid) - 1
         dt = np.diff(t_grid)  # (n_steps,)
 
-        # Number of paths to actually simulate
-        n_sim = n_paths // 2 if antithetic else n_paths
+        # Number of base paths to simulate before optional antithetic pairing.
+        n_sim = (n_paths + 1) // 2 if antithetic else n_paths
 
         # Generate all increments at once: (n_sim, n_steps)
         Z = rng.standard_normal((n_sim, n_steps))
 
         if antithetic:
-            Z = np.concatenate([Z, -Z], axis=0)  # (n_paths, n_steps)
+            Z = np.concatenate([Z, -Z], axis=0)[:n_paths]
 
         # Exact log-normal: log(S(t+dt)/S(t)) = (r-q-σ²/2)dt + σ√dt Z
         drift_inc = (self.r - self.q - 0.5 * self.sigma**2) * dt  # (n_steps,)

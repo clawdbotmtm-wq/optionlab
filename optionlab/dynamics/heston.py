@@ -43,7 +43,7 @@ class Heston(Dynamics):
         theta: float = 0.04,
         xi: float = 0.3,
         rho: float = -0.7,
-    ):
+    ) -> None:
         self.r = r
         self.q = q
         self.V0 = V0
@@ -72,19 +72,20 @@ class Heston(Dynamics):
         dW: NDArray,
         **state: NDArray,
     ) -> tuple[NDArray, dict[str, NDArray]]:
+        """Advance one step under full-truncation Euler."""
         V = state["variance"]
         dW_S = dW[:, 0]
         dW_V = dW[:, 1]
 
-        # Full truncation: use max(V, 0) in diffusion terms
+        # Lord et al. (2010) full-truncation Euler:
+        # V_{n+1} = V_n + kappa*(theta - V_n^+)*dt + xi*sqrt(V_n^+) dW_V
+        # S_{n+1} = S_n * exp((r-q-0.5*V_n^+)dt + sqrt(V_n^+) dW_S)
         V_pos = np.maximum(V, 0.0)
         sqrt_V = np.sqrt(V_pos)
 
-        # Variance process (Euler with full truncation)
+        # Keep the raw variance state for the recursion, as in full truncation.
         V_new = V + self.kappa * (self.theta - V_pos) * dt + self.xi * sqrt_V * dW_V
-        V_new = np.maximum(V_new, 0.0)
 
-        # Spot process (log-Euler for positivity)
         log_drift = (self.r - self.q - 0.5 * V_pos) * dt
         S_new = S * np.exp(log_drift + sqrt_V * dW_S)
 
@@ -98,10 +99,19 @@ class Heston(Dynamics):
         rng: np.random.Generator,
         antithetic: bool = False,
     ) -> dict[str, NDArray]:
+        """Simulate spot/variance paths under Heston dynamics.
+
+        Returns
+        -------
+        dict[str, NDArray]
+            - `spot`: simulated spot paths.
+            - `variance`: nonnegative variance paths (projected for convenience).
+            - `variance_raw`: raw variance state used in the full-truncation recursion.
+        """
         n_steps = len(t_grid) - 1
         dt = np.diff(t_grid)
 
-        n_sim = n_paths // 2 if antithetic else n_paths
+        n_sim = (n_paths + 1) // 2 if antithetic else n_paths
 
         # Generate correlated Brownian increments
         # Z1, Z2 independent standard normals
@@ -109,8 +119,8 @@ class Heston(Dynamics):
         Z2 = rng.standard_normal((n_sim, n_steps))
 
         if antithetic:
-            Z1 = np.concatenate([Z1, -Z1], axis=0)
-            Z2 = np.concatenate([Z2, -Z2], axis=0)
+            Z1 = np.concatenate([Z1, -Z1], axis=0)[:n_paths]
+            Z2 = np.concatenate([Z2, -Z2], axis=0)[:n_paths]
 
         actual_paths = Z1.shape[0]
 
@@ -121,17 +131,21 @@ class Heston(Dynamics):
 
         # Pre-allocate
         spot = np.empty((actual_paths, n_steps + 1))
+        variance_raw = np.empty((actual_paths, n_steps + 1))
         variance = np.empty((actual_paths, n_steps + 1))
         spot[:, 0] = S0
-        variance[:, 0] = self.V0
+        variance_raw[:, 0] = self.V0
+        variance[:, 0] = np.maximum(self.V0, 0.0)
 
         # Step through time (vectorized across paths)
         for i in range(n_steps):
             dW = np.stack([dW_S[:, i], dW_V[:, i]], axis=1)
             S_new, state_new = self.step(
-                t_grid[i], dt[i], spot[:, i], dW, variance=variance[:, i]
+                t_grid[i], dt[i], spot[:, i], dW, variance=variance_raw[:, i]
             )
+            V_new_raw = state_new["variance"]
             spot[:, i + 1] = S_new
-            variance[:, i + 1] = state_new["variance"]
+            variance_raw[:, i + 1] = V_new_raw
+            variance[:, i + 1] = np.maximum(V_new_raw, 0.0)
 
-        return {"spot": spot, "variance": variance}
+        return {"spot": spot, "variance": variance, "variance_raw": variance_raw}

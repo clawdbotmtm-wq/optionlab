@@ -60,7 +60,7 @@ class MonteCarloEngine:
         seed: int | None = 42,
         antithetic: bool = True,
         store_paths: bool = False,
-    ):
+    ) -> None:
         self.n_paths = n_paths
         self.n_steps = n_steps
         self.seed = seed
@@ -102,9 +102,15 @@ class MonteCarloEngine:
             antithetic=self.antithetic,
         )
         spot_paths = path_data["spot"]
+        if spot_paths.shape[0] != self.n_paths:
+            raise ValueError(
+                "Dynamics returned an unexpected number of paths: "
+                f"{spot_paths.shape[0]} vs requested {self.n_paths}."
+            )
 
-        # Compute payoffs (vectorized across all paths)
-        cf = payoff.cashflows(spot_paths, t_grid)
+        # Compute payoffs (vectorized across all paths). Pass the full state
+        # dictionary so state-aware payoffs can consume extra paths (e.g. variance).
+        cf = payoff.cashflows(spot_paths, t_grid, state_paths=path_data)
 
         # Discount to present value
         df = market.discount_curve.discount_factor(T)

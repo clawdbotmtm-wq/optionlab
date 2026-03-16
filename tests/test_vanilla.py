@@ -136,6 +136,25 @@ class TestCustomPayoff:
         assert result.price > 0
         assert result.price < vanilla_price
 
+    def test_custom_payoff_can_use_heston_variance_state(self):
+        """Custom payoff should receive additional state paths from dynamics."""
+        variance_call = ol.CustomPayoff(
+            func=lambda paths, t, state_paths: np.maximum(
+                state_paths["variance"][:, -1] - 0.01,
+                0.0,
+            ),
+            T=0.5,
+            name="Variance Call",
+        )
+
+        market = ol.MarketData.from_flat(100.0, 0.05)
+        dynamics = ol.Heston(r=0.05, V0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+        engine = ol.MonteCarloEngine(n_paths=30_000, n_steps=126, seed=7, antithetic=True)
+        result = engine.price(variance_call, dynamics, market)
+
+        assert result.price > 0
+        assert result.stderr > 0
+
 
 class TestHestonSmoke:
     """Smoke tests for Heston dynamics."""

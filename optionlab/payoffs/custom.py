@@ -1,11 +1,40 @@
 """Lambda-based custom payoffs — pass any function of paths."""
 
+import inspect
 from collections.abc import Callable
+from collections.abc import Mapping
+from typing import Literal
 
-import numpy as np
 from numpy.typing import NDArray
 
 from .base import Payoff
+
+
+StateCallStyle = Literal["none", "positional", "keyword"]
+CustomPayoffFunc = Callable[[NDArray, NDArray], NDArray] | Callable[
+    [NDArray, NDArray, Mapping[str, NDArray]],
+    NDArray,
+]
+
+
+def _resolve_state_call_style(func: Callable[..., NDArray]) -> StateCallStyle:
+    """Determine whether a callable accepts extra state paths."""
+    sig = inspect.signature(func)
+    sentinel = object()
+
+    try:
+        sig.bind(sentinel, sentinel, sentinel)
+    except TypeError:
+        pass
+    else:
+        return "positional"
+
+    try:
+        sig.bind(sentinel, sentinel, state_paths=sentinel)
+    except TypeError:
+        return "none"
+
+    return "keyword"
 
 
 class CustomPayoff(Payoff):
@@ -16,8 +45,11 @@ class CustomPayoff(Payoff):
     Parameters
     ----------
     func : callable
-        Function with signature (paths: NDArray, t_grid: NDArray) -> NDArray
-        that returns the undiscounted payoff for each path.
+        Function returning undiscounted payoff per path.
+        Supported signatures:
+        - (paths: NDArray, t_grid: NDArray) -> NDArray
+        - (paths: NDArray, t_grid: NDArray, state_paths: Mapping[str, NDArray])
+          -> NDArray
     T : float
         Time to expiry in years.
     name : str
@@ -42,19 +74,33 @@ class CustomPayoff(Payoff):
 
     def __init__(
         self,
-        func: Callable[[NDArray, NDArray], NDArray],
+        func: CustomPayoffFunc,
         T: float,
         name: str = "CustomPayoff",
-    ):
+    ) -> None:
         self._func = func
+        self._state_call_style = _resolve_state_call_style(func)
         self.T = T
         self.name = name
 
     @property
     def expiry(self) -> float:
+        """Time to expiry in years."""
         return self.T
 
-    def cashflows(self, paths: NDArray, t_grid: NDArray) -> NDArray:
+    def cashflows(
+        self,
+        paths: NDArray,
+        t_grid: NDArray,
+        state_paths: Mapping[str, NDArray] | None = None,
+    ) -> NDArray:
+        """Compute cashflows using the wrapped callable."""
+        state_paths = {} if state_paths is None else state_paths
+
+        if self._state_call_style == "positional":
+            return self._func(paths, t_grid, state_paths)
+        if self._state_call_style == "keyword":
+            return self._func(paths, t_grid, state_paths=state_paths)
         return self._func(paths, t_grid)
 
     def __repr__(self) -> str:

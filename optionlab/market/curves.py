@@ -16,7 +16,7 @@ class DiscountCurve:
         Continuously compounded risk-free rate.
     """
 
-    def __init__(self, rate: float):
+    def __init__(self, rate: float) -> None:
         self.rate = rate
 
     def discount_factor(self, T: float | NDArray) -> float | NDArray:
@@ -48,7 +48,7 @@ class ForwardCurve:
         Continuous dividend yield.
     """
 
-    def __init__(self, spot: float, rate: float, dividend_yield: float = 0.0):
+    def __init__(self, spot: float, rate: float, dividend_yield: float = 0.0) -> None:
         self.spot = spot
         self.rate = rate
         self.dividend_yield = dividend_yield
